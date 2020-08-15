@@ -1,0 +1,62 @@
+#!/bin/bash -l 
+
+# Project name 
+#$ -P incrna
+
+# Execute the job from  the  current  working  directory
+#$ -cwd
+
+# Job name
+#$ -N cdhit
+
+# Combine output and error files into a single file
+#$ -j y
+#$ -o $JOB_NAME.log
+
+# Send an email when the job finishes or if it is aborted or suspended 
+#$ -m beas
+
+# Request a partial 8 processor node with at least 128 GB of RAM
+#$ -pe omp 8
+#$ -l mem_per_core=8G
+
+# Keep track of information related to the current job in the output file
+echo "=========================================================="
+echo "Running job: $JOB_ID $JOB_NAME"
+echo "Started: $(date +%F)"
+echo "Running in directory: $PWD"
+echo "=========================================================="
+
+##### run in the directory /projectnb/incrna/mary_lncrna/CD_HIT 
+module load blast  
+module load cdhit/4.6.8
+
+
+######### mRNA - James  (took 18 seconds) ############
+cd-hit-est -i mRNA.transcripts.fasta -o mRNA_95 -c 0.95 -n 10 -d 0 -M 16000 -T 8
+## two files: one fasta file of the representative sequenes and a list of clusters (29376  clusters found)  
+## 29376 sequences in the fasta file 
+
+
+######### lncRNA - James (took 3 seconds)  ############
+cd-hit-est -i pfamfilt.fasta -o lncRNA_95 -c 0.95 -n 10 -d 0 -M 16000 -T 8
+## two files similar to the above run outputs - 16140  clusters 
+## 16140 in the fasta file
+
+
+######### lncRNA - Mary (took 3 seconds) ############
+cd-hit-est -i pfam_filtered.fasta -o mary_lncRNA_95 -c 0.95 -n 10 -d 0 -M 16000 -T 8
+## two output files similar to above runs - 14847  clusters 
+## 14847 in the fasta file 
+
+######### mRNA - Mary (took ~15 seconds) ############
+cd-hit-est -i /projectnb/incrna/mary_lncrna/runs/counts/mRNA.transcripts.fasta -o /projectnb/incrna/mary_lncrna/CD_HIT/mary_mRNA_95 -c 0.95 
+-n 10 -d 0 -M 16000 -T 8
+## two output files similar to above runs - 101867  clusters 
+## 101867 in the fasta file
+
+
+echo "=========================================================="
+echo "Job finished: $(date +%F)"
+echo "Finished in $SECONDS seconds."
+echo "=========================================================="
