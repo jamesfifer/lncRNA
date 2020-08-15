@@ -1,6 +1,4 @@
-#!/usr/bin/Rscript
-
-# module load R - remember to run this on the command line first 
+#!/usr/bin/Rscript 
 
 # set working directory 
 setwd("/projectnb2/incrna/mary_lncrna/R/repeat")
