@@ -1,0 +1,38 @@
+#!/bin/bash -l 
+
+# Project name 
+#$ -P incrna
+
+# Execute the job from  the  current  working  directory
+#$ -cwd
+
+# Job name
+#$ -N corr_test
+
+# Combine output and error files into a single file
+#$ -j y
+#$ -o $JOB_NAME.log
+
+# Send an email when the job finishes or if it is aborted or suspended 
+#$ -m beas
+
+# Request a partial 8 processor node with at least 128 GB of RAM
+#$ -pe omp 8
+#$ -l mem_per_core=8G
+
+
+# Keep track of information related to the current job in the output file
+echo "=========================================================="
+echo "Running job: $JOB_ID $JOB_NAME"
+echo "Started: $(date +%F)"
+echo "Running in directory: $PWD"
+echo "=========================================================="
+
+module load R
+
+Rscript /projectnb2/incrna/mary_lncrna/R/repeat/corr_test.R
+
+echo "=========================================================="
+echo "Job finished: $(date +%F)"
+echo "Finished in $SECONDS seconds."
+echo "=========================================================="
