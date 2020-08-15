@@ -1,0 +1,385 @@
+#!/bin/bash -l 
+
+# Project name 
+#$ -P incrna
+
+# Execute the job from  the  current  working  directory
+#$ -cwd
+
+# Specify the hard time limit for the job (this can be edited according to the command being run and the time it takes) 
+#$ -l h_rt=48:00:00
+
+# Job name (this can be edited according to the command being run for easier identification of the .log file later on)
+#$ -N complete_pipeline
+
+# Combine output and error files into a single file
+#$ -j y
+#$ -o $JOB_NAME.log
+
+# Send an email when the job starts, finishes or if it is aborted or suspended 
+#$ -m beas
+
+# Request a processor node with _GB of RAM (this can be edited according to the command being run) 
+# I used "-pe omp 28", "-l mem_per_core=4G" or "-pe omp 8", "-l mem_per_core=8G" depending on which chunk of code is run 
+#$ -pe omp 28
+#$ -l mem_per_core=4G
+
+# Keep track of information related to the current job in the output file
+echo "=========================================================="
+echo "Running job: $JOB_ID $JOB_NAME"
+echo "Started: $(date +%F)"
+echo "Running in directory: $PWD"
+echo "=========================================================="
+
+########### The files and outputs from the overall analyses are stored in "samples" and "runs" directories under "/projectnb/incrna/mary_lncrna/" ########################
+# Commands starting with "###" were run on the command line 
+# If a line starts with "#", it is an instruction and if it starts with "##", it is either an explanation of an option/parameter used by a command or the result/s obtained from a run
+# When preparing this file, the codes were run in chunks as separated/indicated with the # lines    
+
+########################### The following analyses outputs are stored in "/projectnb/incrna/mary_lncrna/samples" directory #####################################################
+
+########################### download sequence files and extract to FASTQ - sratoolkit (38 min 43 sec) #######################################
+
+module load sratoolkit/2.9.2 # make SRA tools available
+prefetch --option-file SRR_Acc_List.txt  
+## --option-file = read more options and parameters from the file SRR_Acc_List.txt 
+## downloaded sequence files are in the compressed SRA format
+## to change the directory where SRA files are downloaded -> after loading the sratools module, type "vdb-config -i" in the commandline then change the directory path --- new directory needs to be empty
+
+# extract the SRA format to FASTQ 
+fastq-dump --split-files /projectnb/incrna/mary_lncrna/samples/files/sra/SRR* -O /projectnb/incrna/mary_lncrna/samples/files
+## single-end sequenceing because only produced one file for each sample 
+
+
+########################### build indexes and align - hisat2 (5 hr 39 min 25 sec) ###################################################################
+
+# the file that contained Modified_C_goreaui_genome.fa was not found on the link provided so had to use the one already downloaded by James 
+module load hisat2 
+hisat2-build /projectnb/incrna/mary_lncrna/samples/refgenome/Modified_C_goreaui_genome.fa /projectnb/incrna/mary_lncrna/samples/refgenome/SymbC1 
+## built indexes for the ref genome -- gave 8 .ht2 files
+
+
+# fastq files as input then give out SAM files  
+for i in /projectnb/incrna/mary_lncrna/samples/files/*fastq
+do
+  hisat2 -x /projectnb/incrna/mary_lncrna/samples/refgenome/SymbC1 --dta -U "$i" -S "${i/%.fastq/.sam}"
+done
+## -x = basename of the index for the reference genome which is set as "SymbC1" in the previous run command 
+## --dta = report alignments tailored for transcript assemblers including StringTie - SAM file will contain the tag XS to indicate the genomic strand that produced the RNA from which the read was sequenced
+## -U = comma-separated list of files containing unpaired reads to be aligned 
+## -S = file to write SAM alignments to
+
+##################################################################################################################
+## Note: It is highly recommended to use the reference annotation information when mapping the reads, which can be either embedded in the genome index (built with the --ss and --exon options, see HISAT2 manual), or provided separately at run time (using the --known-splicesite-infile option of HISAT2). It might also not be necessary since for stringtie we use the -G option which is using reference annotation information upon assembly, so either way we still use the reference annotations.
+##################################################################################################################
+
+
+########################### convert to BAM - samtools (1 hr 38 min 9 sec) ###################################################################
+
+# sort and convert SAM files to BAM 
+module load htslib/1.9 # had to load this first for samtools to be loaded 
+module load samtools/1.9
+
+for i in /projectnb/incrna/mary_lncrna/samples/files/*sam
+do
+  samtools sort "$i" -o "${i/%.sam/.sorted.bam}" 
+done 
+## sort = automatically converts SAM to BAM while sorting 
+## /%.sam/ is removing the ".sam" extension at the end of the files so the output files can be named correctly   
+
+
+########################### assemble aligned reads and filter out non-lncRNAs - StringTie (1 hr 6 min 56 sec) ###################################################################
+
+# for each RNA-Seq sample, assemble the read alignments (BAM files) obtained in the previous step using StringTie
+# it is recommended to run StringTie with the -G option if the reference annotation is available - this will incorporate the already annotated sequences in addition to any new ones and gives mRNA features
+
+module load stringtie/1.3.3
+
+for i in /projectnb/incrna/mary_lncrna/samples/files/*sorted.bam
+do
+  stringtie "$i" -o "${i/%.sorted.bam/.out_gtf}" -G /projectnb/incrna/mary_lncrna/samples/refgenome/Modified_C_goreaui.gff  
+done 
+
+# create a non-redunant list of all sequences and filter out everything except for lncRNAs
+stringtie --merge -p 8 -o /projectnb/incrna/mary_lncrna/samples/files/stringtie_merged.gtf /projectnb/incrna/mary_lncrna/samples/files/assembly_GTF_list.txt
+## --merge = merges/assembles the transcripts into a non-redundant set of transcripts
+## -p = specifies the number of processing threads (CPUs) to use for transcript assembly
+## assembly_GTF_list.txt is a text file that contains a list of paths for the .out_gtf files
+
+
+########################### convert to fasta file - gffread (33 sec) ###################################################################
+
+# covert merged gtf file into a fasta file - saved it in the plast directory for subsequent analyses   
+/projectnb/incrna/gffread/gffread-0.11.4/gffread -w /projectnb/incrna/mary_lncrna/runs/plast/transcripts.fasta -g /projectnb/incrna/mary_lncrna/samples/refgenome/Modified_C_goreaui_genome.fa /projectnb/incrna/mary_lncrna/samples/files/stringtie_merged.gtf           
+## -w = write a fasta file with spliced exons for each GFF transcript
+## -g = the .fa file is a multi-fasta file with the genomic sequences of the target genome for all input mappings
+## a new file was created "Modified_C_goreaui_genome.fa.fai" in the directory where the .fa file is located in additon to transcripts.fasta 
+
+# run on the command line to find the # of sequences 
+###grep -c '>' transcripts.fasta 
+## James first .fasta file had 114599, his second run had 111998 while mine had 111670 sequences   
+
+
+########################### The next analyses outputs are stored in "/projectnb/incrna/mary_lncrna/runs/plast" directory ################################################
+
+########################### plast1 and filter - prot (17 min 5 sec) ###################################################################
+
+# plast against the predicted protein file for symC1
+/projectnb/incrna/Plast/build/bin/plast -a $NSLOTS -p plastx -i /projectnb/incrna/mary_lncrna/runs/plast/transcripts.fasta -d /projectnb/incrna/mary_lncrna/samples/refgenome/Modified_C_goreaui.proteins.faa -max-hit-per-query 1 -max-hsp-per-hit 1 -e 1e-3 -o /projectnb/incrna/mary_lncrna/runs/plast/plast1.out
+## had to add -a to limit the number of processors plast uses - it will fail/be terminated if not 
+
+
+# extract the gene IDs that had plast hits  
+awk '{print $1}' /projectnb/incrna/mary_lncrna/runs/plast/plast1.out | sort | uniq > /projectnb/incrna/mary_lncrna/runs/plast/plast1_IDs.txt
+
+# remove sequences that had plast hits and recreate a new transcriptome
+module load python3 # if filter_fasta_by_list_of_headers.py is used for the first time, this line needs to be run first 
+/projectnb/incrna/mary_lncrna/runs/plast/filter_fasta_by_list_of_headers.py /projectnb/incrna/mary_lncrna/runs/plast/transcripts.fasta /projectnb/incrna/mary_lncrna/runs/plast/plast1_IDs.txt > /projectnb/incrna/mary_lncrna/runs/plast/transcripts2.fasta
+## transcripts2.fasta = 32555 sequences 
+
+
+########################### plast2 and filter - ncbi nr (time taken is indicated separately below) ###################################################################
+
+############################ next three commands were run on the commandline (trial with the first 100 sequences) ###########################
+
+# first remove the new lines from each sequence (make the sequence continous on one line)
+###awk '/^>/ {printf("\n%s\n",$0);next; } { printf("%s",$0);}  END {printf("\n");}' < /projectnb/incrna/mary_lncrna/runs/plast/transcripts2.fasta > /projectnb/incrna/mary_lncrna/runs/plast/nonewline__transcripts2.fasta
+
+# remove the first empty line 
+###sed 1d /projectnb/incrna/mary_lncrna/runs/plast/nonewline__transcripts2.fasta > /projectnb/incrna/mary_lncrna/runs/plast/corr_nonewline_transcripts2.fasta
+
+# select the first 100 transcripts (200 lines - header and sequence) 
+###head -200 /projectnb/incrna/mary_lncrna/runs/plast/corr_nonewline_transcripts2.fasta > /projectnb/incrna/mary_lncrna/runs/plast/first100_transcripts2.fasta
+
+# reformat the sequence to have line breaks like the original fasta file 
+###fold -w 60 /projectnb/incrna/mary_lncrna/runs/plast/first100_transcripts2.fasta > /projectnb/incrna/mary_lncrna/runs/plast/top100.fasta
+
+#####################################################################################################################################################################
+
+########################### main data preperation for plast2 run against ncbi nr ###################################################################
+# since the original plast run against the ncbi db was taking too long, we decided to split the entire transcriptome into sets of 1000 sequences and run those as individual jobs
+
+############################ run on the commandline (split transcriptome to 1000 sequences) ###########################
+
+# first remove the new lines from each sequence (make the sequence continous on one line)
+###awk '/^>/ {printf("\n%s\n",$0);next; } { printf("%s",$0);}  END {printf("\n");}' < /projectnb/incrna/mary_lncrna/runs/plast/transcripts2.fasta > /projectnb/incrna/mary_lncrna/runs/plast/nonewline__transcripts2.fasta
+
+# remove the first empty line 
+###sed 1d /projectnb/incrna/mary_lncrna/runs/plast/nonewline__transcripts2.fasta > /projectnb/incrna/mary_lncrna/runs/plast/corr_nonewline_transcripts2.fasta
+
+# split transcriptome - 1000 sequences each (2000 lines - header and sequence) and save into a separate directory  
+###split -dl 2000 --additional-suffix=.fasta /projectnb/incrna/mary_lncrna/runs/plast/corr_nonewline_transcripts2.fasta /projectnb/incrna/mary_lncrna/runs/plast/1000seq_run/splitFasta_
+
+# reformat the sequences to have line breaks like the original fasta file - did them one by one as follows but I know there is a way to do it with a for loop which I will look into later if I have time 
+###fold -w 60 /projectnb/incrna/mary_lncrna/runs/plast/1000seq_run/splitFasta_00.fasta > /projectnb/incrna/mary_lncrna/runs/plast/1000seq_run/splitFasta_00.corr.fasta
+
+#####################################################################################################################################################################
+
+# plast against ncbi non-redundant (nr) db 
+############################ trial with the first 100 sequences - took 44 min 44 sec ###########################
+
+###/projectnb/incrna/Plast/build/bin/plast -a $NSLOTS -p plastx -i /projectnb/incrna/mary_lncrna/runs/plast/1000seq_run/top100.fasta -d /projectnb/incrna/ncbi/projectnb/incrna/ncbi/nr.pal -max-hit-per-query 1 -max-hsp-per-hit 1 -e 1e-3 -o /projectnb/incrna/mary_lncrna/runs/plast/forcedtop100_plast2.out 
+#####################################################################################################################################################################
+
+########################### main run for plast2 run - ncbi nr and filter ###################################################################
+# run the command for 24 hours and only 15 files out of 32 were able to get processed completely so I increased the run to 32 hours and run the rest of the files (first 15 files took 23 hr 23 min and the rest 17 files took 1 day 3 hr 27 min and 16 sec -> total time = a little over 2 days (2 days 2 hr 50 min 16 sec)
+for i in /projectnb/incrna/mary_lncrna/runs/plast/1000seq_run/*corr.fasta
+do
+  /projectnb/incrna/Plast/build/bin/plast -a $NSLOTS -p plastx -i "$i" -d /projectnb/incrna/ncbi/projectnb/incrna/ncbi/nr.pal -max-hit-per-query 1 -max-hsp-per-hit 1 -e 1e-3 -o "${i/%.corr.fasta/.out}" 
+done
+
+# filtering took 5 seconds - the next two commands  
+# extract the gene IDs that had plast hits from the 32 runs done with the for loop above  
+awk '{print $1}' /projectnb/incrna/mary_lncrna/runs/plast/1000seq_run/*out | sort | uniq > /projectnb/incrna/mary_lncrna/runs/plast/plast2_IDs.txt
+
+# remove sequences that had plast hits and recreate a new transcriptome
+/projectnb/incrna/mary_lncrna/runs/plast/filter_fasta_by_list_of_headers.py /projectnb/incrna/mary_lncrna/runs/plast/transcripts2.fasta /projectnb/incrna/mary_lncrna/runs/plast/plast2_IDs.txt > /projectnb/incrna/mary_lncrna/runs/plast/transcripts3.fasta
+## transcripts3.fasta = 23088 sequences
+## sanity check: 32555 (started with) - 9467 (removed) = 23088 (left)
+
+
+########################### plast3 and filter - uniprot (11 min 8 sec)###################################################################
+
+# plast against uniprot db
+/projectnb/incrna/Plast/build/bin/plast -a $NSLOTS -p plastx -i /projectnb/incrna/mary_lncrna/runs/plast/transcripts3.fasta -d /projectnb/incrna/swissprot/uniprot_sprot.fasta -max-hit-per-query 1 -max-hsp-per-hit 1 -e 1e-3 -o /projectnb/incrna/mary_lncrna/runs/plast/plast3.out
+
+# extract the gene IDs that had plast hits  
+awk '{print $1}' /projectnb/incrna/mary_lncrna/runs/plast/plast3.out | sort | uniq > /projectnb/incrna/mary_lncrna/runs/plast/plast3_IDs.txt
+
+# remove sequences that had plast hits and recreate a new transcriptome
+/projectnb/incrna/mary_lncrna/runs/plast/filter_fasta_by_list_of_headers.py /projectnb/incrna/mary_lncrna/runs/plast/transcripts3.fasta /projectnb/incrna/mary_lncrna/runs/plast/plast3_IDs.txt > /projectnb/incrna/mary_lncrna/runs/plast/transcripts4.fasta
+## transcripts4.fasta = 23018 sequences 
+## sanity check: 23088 (started with) - 70 (removed) = 23018 (left) 
+
+
+################### post plast filter - outputs saved in a different directory "/projectnb/incrna/mary_lncrna/runs/post_plast" ###################################################
+
+########################### additional filter (5 sec) ###################################################################
+
+# change fasta format to single line (remove new line from each sequence) 
+awk '/^>/ {printf("\n%s\n",$0);next; } { printf("%s",$0);}  END {printf("\n");}' < /projectnb/incrna/mary_lncrna/runs/plast/transcripts4.fasta > /projectnb/incrna/mary_lncrna/runs/post_plast/single_line_transcripts.fasta
+
+# remove sequences that are <200 nt
+perl /projectnb/incrna/RunWithNewGenome/Post_Blast_Filter/removesmalls.pl 200 /projectnb/incrna/mary_lncrna/runs/post_plast/single_line_transcripts.fasta > /projectnb/incrna/mary_lncrna/runs/post_plast/above_200nt_transcripts.fasta
+## they were all >200; above_200nt_transcripts.fasta = 23018 sequences
+
+
+# remaining transcripts were subjected to the ORF prediction to remove ones that are of protein-coding potential based on the maximum ORF size of 100 amino acid residues
+module load emboss
+getorf -sequence /projectnb/incrna/mary_lncrna/runs/post_plast/above_200nt_transcripts.fasta -minsize 300 -find 0 -outseq /projectnb/incrna/mary_lncrna/runs/post_plast/removethese 
+## minsize 300 = return all orfs >300 nucleotides (100 aa); removethese = 14270 sequences
+ 
+# list of IDs of transcripts with protein-coding potential  
+grep -e ">" /projectnb/incrna/mary_lncrna/runs/post_plast/removethese | awk '{print$1}' | awk 'sub(/^>/, "")' | while read i; do echo ${i/%_*/}; done | uniq > /projectnb/incrna/mary_lncrna/runs/post_plast/100aa_removethese.txt
+## 7427 unique IDs to remove 
+
+# remove these transcripts 
+/projectnb/incrna/mary_lncrna/runs/plast/filter_fasta_by_list_of_headers.py /projectnb/incrna/mary_lncrna/runs/post_plast/above_200nt_transcripts.fasta /projectnb/incrna/mary_lncrna/runs/post_plast/100aa_removethese.txt > /projectnb/incrna/mary_lncrna/runs/post_plast/100aaORF_transcripts.fasta
+## 100aaORF_transcripts.fasta = 15591 sequences left
+## sanity check: 23018 (started with) - 7427 (removed) = 15591 (left)
+
+
+########################### CPC (23 sec) ###################################################################
+# additional filtering using Coding Potential Calculator (CPC) to assess the protein-coding potential of those putative lncRNA candidates
+
+##################################################################################################################
+# James had already run this so there was no need to run it again 
+###. Unpack the tarball:
+###tom@linux$ gzip -dc CPC2-beta.tar.gz | tar xf -
+###b. Build third-part packages:
+###tom@linux$ cd CPC2-beta
+###tom@linux$ export CPC_HOME="$PWD"
+###tom@linux$ cd libs/libsvm
+###tom@linux$ gzip -dc libsvm-3.18.tar.gz | tar xf -
+###tom@linux$ cd libsvm-3.18
+###tom@linux$ make clean && make
+##################################################################################################################
+
+
+module unload python3
+module load python2
+
+python /projectnb/incrna/RunWithNewGenome/Post_Blast_Filter/CPC_filter/CPC2-beta/bin/CPC2.py -i /projectnb/incrna/mary_lncrna/runs/post_plast/100aaORF_transcripts.fasta -o /projectnb/incrna/mary_lncrna/runs/post_plast/cpc_output.txt
+## 15591 genes (the first line was a header) 
+
+# extract genes that are predicted to be coding according to CPC
+grep -v 'noncoding' /projectnb/incrna/mary_lncrna/runs/post_plast/cpc_output.txt > /projectnb/incrna/mary_lncrna/runs/post_plast/coding.txt
+## -v = takes inverse so output will be everything that isn't noncoding  
+## 10 coding genes to remove (the first line was a header) 
+
+# IDs of coding genes 
+awk '{print $1}' /projectnb/incrna/mary_lncrna/runs/post_plast/coding.txt > /projectnb/incrna/mary_lncrna/runs/post_plast/coding_IDs.txt 
+
+# filter the transcripts  
+module unload python2
+module load python3
+/projectnb/incrna/mary_lncrna/runs/plast/filter_fasta_by_list_of_headers.py /projectnb/incrna/mary_lncrna/runs/post_plast/100aaORF_transcripts.fasta /projectnb/incrna/mary_lncrna/runs/post_plast/coding_IDs.txt > /projectnb/incrna/mary_lncrna/runs/post_plast/CPC_filtered.fasta
+## CPC_filtered.fasta = 15581 sequences
+## sanity check: 15591 (started with) - 10 (removed) = 15581 (left)
+
+# print IDs of the remaining transcripts to create lncRNA list
+awk 'sub(/^>/, "")' /projectnb/incrna/mary_lncrna/runs/post_plast/CPC_filtered.fasta > /projectnb/incrna/mary_lncrna/runs/post_plast/CPC_filtered_IDs.txt
+
+
+########################### mircroRNA (1 hr 9 min 50 sec) ###################################################################
+
+# extract the unwanted transcripts 
+/projectnb/incrna/infernal-1.1.2/src/cmsearch -A hits --tblout /projectnb/incrna/mary_lncrna/runs/post_plast/miRNA_output.txt -E 0.01 /projectnb/incrna/Rfam.cm /projectnb/incrna/mary_lncrna/runs/post_plast/CPC_filtered.fasta
+## 72 genes
+
+# get their IDs
+grep "MSTRG" /projectnb/incrna/mary_lncrna/runs/post_plast/miRNA_output.txt | awk '{print $1}' | sort| uniq > /projectnb/incrna/mary_lncrna/runs/post_plast/miRNA_IDs.txt
+## 50 unique IDs 
+
+# filter them out 
+/projectnb/incrna/mary_lncrna/runs/plast/filter_fasta_by_list_of_headers.py /projectnb/incrna/mary_lncrna/runs/post_plast/CPC_filtered.fasta /projectnb/incrna/mary_lncrna/runs/post_plast/miRNA_IDs.txt > /projectnb/incrna/mary_lncrna/runs/post_plast/miRNA_filtered.fasta
+## miRNA_filtered.fasta = 15531 sequences 
+## sanity check: 15581 (started with) - 50 (removed) = 15531 (left) 
+
+# IDs of the remaining transcripts 
+awk 'sub(/^>/, "")' /projectnb/incrna/mary_lncrna/runs/post_plast/miRNA_filtered.fasta > /projectnb/incrna/mary_lncrna/runs/post_plast/miRNA_filtered_IDs.txt 
+
+########################### Pfam - before scp (7 sec); phmmer run took around/less than 15 min; after scp (3-4 sec) ###############################################################
+
+# Lastly, the remaining transcripts that were predicted to encode any protein domains/motifs in Pfam database were filtered out using the localized version of Pfamscan
+
+cd /projectnb/incrna/mary_lncrna/runs/post_plast/ # so that outputs from the run are saved in this directory - only needed for this chuck of code 
+
+module load transdecoder
+
+TransDecoder.LongOrfs -t /projectnb/incrna/mary_lncrna/runs/post_plast/miRNA_filtered.fasta
+
+# scp or save /projectnb/incrna/mary_lncrna/runs/post_plast/miRNA_filtered.fasta.transdecoder_dir/*pep to my local computer and uploaded to https://www.ebi.ac.uk/Tools/hmmer/search/phmmer 
+# used default threshold - Significance threshold (E-value)	of 0.01 for sequence matches and 0.03 for hit matches
+# copied and pasted results from email into a file named pfam_output.txt under /projectnb/incrna/mary_lncrna/runs/post_plast/ 
+## 194 genes with 155 unique ones (96 with no matches found (85 unique), 98 had matches (86 unique)) - some genes had both matches and no matches (ex. MSTRG.10920.1) that is why the unique numbers don't add up 
+## only removing the ones that had matches 
+
+grep -v "No matches found" pfam_output.txt > remove_pfamMatches.txt
+
+cat /projectnb/incrna/mary_lncrna/runs/post_plast/remove_pfamMatches.txt | grep -o -P '(?<=::).*(?=::g)' | sort | uniq > /projectnb/incrna/mary_lncrna/runs/post_plast/pfam_output_IDs.txt
+## 86 genes 
+
+/projectnb/incrna/mary_lncrna/runs/plast/filter_fasta_by_list_of_headers.py /projectnb/incrna/mary_lncrna/runs/post_plast/miRNA_filtered.fasta /projectnb/incrna/mary_lncrna/runs/post_plast/pfam_output_IDs.txt > /projectnb/incrna/mary_lncrna/runs/post_plast/pfam_filtered.fasta
+## pfam_filtered.fasta = 15445 sequences 
+## sanity check: 15531 (started with) - 86 (removed) = 15445 (left)    
+
+awk 'sub(/^>/, "")' /projectnb/incrna/mary_lncrna/runs/post_plast/pfam_filtered.fasta > /projectnb/incrna/mary_lncrna/runs/post_plast/pfam_filtered_IDs.txt
+
+###### FINAL LNCRNA FASTA FILE  ######## - /projectnb/incrna/mary_lncrna/runs/post_plast/pfam_filtered.fasta
+
+
+########################### Creating counts files - outputs saved in "/projectnb/incrna/mary_lncrna/runs/counts" directory #######################################################
+
+# first extract the mRNA transcripts 
+perl -p -e "s/^>/>mRNA./g" /projectnb/incrna/mary_lncrna/runs/plast/transcripts.fasta > /projectnb/incrna/mary_lncrna/runs/counts/mRNA.transcripts.fasta
+## 111670 mRNA transcripts 
+
+# merge the mRNAs and filtered lncRNAs  
+cat /projectnb/incrna/mary_lncrna/runs/post_plast/pfam_filtered.fasta /projectnb/incrna/mary_lncrna/runs/counts/mRNA.transcripts.fasta > /projectnb/incrna/mary_lncrna/runs/counts/lncRNA.mRNA.fasta
+## lncRNA.mRNA.fasta = 127115 transcripts 
+## sanity check: 111670 (mRNA) + 15445 (lncRNA) = 127115 (total) 
+
+# using salmon's mapping-based mode (didn't make much sense to do alignment based since the whole reason Salmon is better than featurecounts is because it offers alignment independent count generation)
+# can do either quasi-mapping or selective alignment
+# selective alignment, enabled by the --validateMappings flag, is a major feature enhancement introduced in recent versions of salmon and it seems like it's better
+# more info can be found on the salmon manual - https://salmon.readthedocs.io/en/latest/salmon.html
+
+######################################## already done by James so didn't need to run these again ###################################
+#wget https://github.com/COMBINE-lab/salmon/releases/download/v0.99.0-beta2/salmon_0.99.0_beta2_linux_x86_64.tar.gz 
+#wget https://raw.githubusercontent.com/COMBINE-lab/SalmonTools/master/scripts/generateDecoyTranscriptome.sh
+#chmod 777 generateDecoyTranscriptome.sh
+#wget https://github.com/marbl/MashMap/releases/download/v2.0/mashmap-Linux64-v2.0.tar.gz
+#tar -xvf mashmap-Linux64-v2.0.tar.gz
+####################################################################################################################################
+
+module load bedtools
+# generates a decoy text file and a decoy transcriptome (original transcriptome plus decoys) - took 8 min 51 sec 
+/projectnb/incrna/RunWithNewGenome/Counts/generateDecoyTranscriptome.sh -m /projectnb/incrna/RunWithNewGenome/Counts/mashmap-Linux64-v2.0/mashmap -t /projectnb/incrna/mary_lncrna/runs/counts/lncRNA.mRNA.fasta -a /projectnb/incrna/mary_lncrna/samples/refgenome/Modified_C_goreaui.gff -g /projectnb/incrna/mary_lncrna/samples/refgenome/Modified_C_goreaui_genome.fa -o /projectnb/incrna/mary_lncrna/runs/counts/
+
+
+# create the index directory - took 6 min & 50 sec 
+/projectnb/incrna/RunWithNewGenome/Counts/salmon_0.99.0_beta2_linux_x86_64/bin/salmon index -t /projectnb/incrna/mary_lncrna/runs/counts/gentrome.fa -i /projectnb/incrna/mary_lncrna/runs/counts/lncRNA.mRNA_index --decoys /projectnb/incrna/mary_lncrna/runs/counts/decoys.txt -k 31
+
+#create files with all the .fastq files (options = -pe omp 28 & -l mem_per_core=4G) - took 10 min 27 sec
+for i in /projectnb/incrna/mary_lncrna/samples/files/*.fastq
+do
+  /projectnb/incrna/RunWithNewGenome/Counts/salmon_0.99.0_beta2_linux_x86_64/bin/salmon quant -i /projectnb/incrna/mary_lncrna/runs/counts/lncRNA.mRNA_index -l A -r "$i" --validateMappings -o "${i/%.fastq/}".transcripts_quant
+done 
+## the new files are created in the directory where the fastq files are located (in our case - /projectnb/incrna/mary_lncrna/samples/files/)
+## -l A = to allow Salmon to automatically infer the library type (can also be done with --libType A)
+## -r = for single end reads
+
+cd /projectnb/incrna/mary_lncrna/samples/files/ # direct it to the right directory 
+# take all the quant files that were just generated and rename them (took 2 sec)
+find -name 'SRR*quant' -type d -exec mv -nv -- {}/quant.sf {}.quant.sf \; -empty -delete
+# count files are ready - read in R for further anayses 
+
+
+echo "=========================================================="
+echo "Job finished: $(date +%F)"
+echo "Finished in $SECONDS seconds."
+echo "=========================================================="
+
+
+
