@@ -1,0 +1,111 @@
+#!/bin/bash -l 
+
+# Project name 
+#$ -P incrna
+
+# Execute the job from  the  current  working  directory
+#$ -cwd
+
+# Job name
+#$ -N mRNA_annot
+
+# Combine output and error files into a single file
+#$ -j y
+#$ -o $JOB_NAME.log
+
+# Send an email when the job finishes or if it is aborted or suspended 
+#$ -m beas
+
+# Request a partial 8 processor node with at least 128 GB of RAM
+#$ -pe omp 8
+#$ -l mem_per_core=8G
+
+# Keep track of information related to the current job in the output file
+echo "=========================================================="
+echo "Running job: $JOB_ID $JOB_NAME"
+echo "Started: $(date +%F)"
+echo "Running in directory: $PWD"
+echo "=========================================================="
+
+
+##### Runs were executed on the command line unless indicated otherwise 
+##### Run in /projectnb/incrna/mary_lncrna/annotation directory 
+##### Used as a guide - https://github.com/rachelwright8/PLAST_annotate_Bminutum/blob/master/Bmin_JParkinson_plast_annotation_walkthru.txt
+
+##### ##### ##### ##### ##### ##### ##### 
+##### Annotating the transcriptome #####
+##### ##### ##### ##### ##### ##### ##### 
+
+# plast against uniprot db - submitted as a job (took 55 min and 49 sec) - options used were taken from the github 
+/projectnb/incrna/Plast/build/bin/plast -a $NSLOTS -p plastx -i /projectnb/incrna/mary_lncrna/annotation/mRNA.transcripts.fasta -d /projectnb/incrna/swissprot/uniprot_sprot.fasta -max-hit-per-query 1 -max-hsp-per-hit 1 -e 1e-4 -o /projectnb/incrna/mary_lncrna/annotation/mRNA_annot.out
+## 66113 annotations: wc -l mRNA_annot.out
+## 31166 genes in the original transcriptome: grep -c ">" mRNA.transcripts.fasta
+
+# a lots of non-unique hits in the plast results so to find the unique ones -- sort by trancsript ID and then by e-value -> look for instances where the first column (transcript ID) is unique -> save onto a new file (save lowest e-value for each transcript)
+cat mRNA_annot.out | sort -k1,1 -k11,11g | awk '!seen[$1]++' > uniq_mRNA_annot.out
+## 'g' makes it interpret the exponent properly 
+## 13553 unique annotations: wc -l uniq_mRNA_annot.out
+
+
+##### ##### ##### ##### ##### ##### ##### #####
+##### Gene description and GO annotations #####
+##### ##### ##### ##### ##### ##### ##### #####
+
+# get gene description and gene IDs from uniprot fasta file, save into separate files and then combine them to one complete file   
+grep ">" /projectnb/incrna/swissprot/uniprot_sprot.fasta | awk '{$1="";print $0}'> geneDescriptions
+grep ">" /projectnb/incrna/swissprot/uniprot_sprot.fasta | awk '{print $1}' | sed 's/>sp[|]//' | sed 's/[|].*//'> geneIDs
+paste geneIDs geneDescriptions > longGeneNames
+
+## filter the plast output (unique one) to only include the IDs - 2 columns  
+cat uniq_mRNA_annot.out  | awk {'print $1"\t"$2'} | awk -F '[|]' {'print $1"\t"$2'} | cut -f1,3 > plastoutputIDs
+
+############################ Make annotation files  ##############################
+##### make gene description file ##### 
+# file 1 = plastoutputIDs
+# column 1 = transcript ID ; column 2 = short gene ID
+# file 2 = longGeneNames
+# column 1 = short gene ID; column 2 = gene description
+
+# match up the gene IDs from the plast output (second column) with the gene IDs from uniprot file (first column)
+join -1 2 -2 1 -e "noMatch" -t $'\t' <(sort -k2 plastoutputIDs) <(sort -k1 longGeneNames) | awk 'BEGIN {FS="\t"; OFS="\t"} {print $2, $1, $3}' > transcript2geneDescription.out
+## wc -l transcript2geneDescription.out - 13553 
+
+# download the uniprot id_mapping table (takes a bit of time to download - 1 min 49 sec (44.6 MB/s))
+wget ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/idmapping_selected.tab.gz
+gunzip idmapping_selected.tab.gz # submitted as a job (4 min 31 sec)
+
+##### make gene ontology file ##### 
+# file 1 = plastoutputIDs
+# column 1 = transcript ID ; column 2 = short gene ID
+# file 2 = idmapping_selected.tab
+# column 1 = short gene ID; column 7 = gene description
+
+# test run
+head -10000 idmapping_selected.tab > testidmmapping_selected.tab
+join -1 2 -2 1 -e "noMatch" -t $'\t' <(sort -k2 plastoutputIDs) <(sort -k1 testidmmapping_selected.tab) | awk 'BEGIN {FS="\t"; OFS="\t"} {print $2, $1, $8}' > test.out
+###head test.out # checking the output 
+
+## the test run worked so now we proceed to running the full job - submitted as a job (10 min 59 sec)
+join -1 2 -2 1 -e "noMatch" -t $'\t' <(sort -k2 plastoutputIDs) <(sort -k1 idmapping_selected.tab) | awk 'BEGIN {FS="\t"; OFS="\t"} {print $2, $1, $8}' > transcript2go.out
+
+## cross checking numbers 
+## mRNA.transcripts.fasta - 31166
+ 
+## uniq_mRNA_annot.out - 13553
+
+## transcript2geneDescription.out - 13553 (no noMatch found)
+
+## transcript2go.out - 13553 (some match and some don't)
+
+## number of "noMatch" in transcript2go.out - "grep -c "noMatch" transcript2go.out" - 401 
+
+## number of GO hits in transcript2go.out - "grep -c "GO" transcript2go.out" - 13152
+
+# sanity check 
+## 13152 + 401 = 13553 - the noMatch and match numbers add up to the total number of lines in the transcript2go.out file
+
+
+echo "=========================================================="
+echo "Job finished: $(date +%F)"
+echo "Finished in $SECONDS seconds."
+echo "=========================================================="
