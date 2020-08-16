@@ -178,7 +178,7 @@ module load python3 # if filter_fasta_by_list_of_headers.py is used for the firs
 # plast against ncbi non-redundant (nr) db 
 ############################ trial with the first 100 sequences - took 44 min 44 sec ###########################
 
-###/projectnb/incrna/Plast/build/bin/plast -a $NSLOTS -p plastx -i /projectnb/incrna/mary_lncrna/runs/plast/1000seq_run/top100.fasta -d /projectnb/incrna/ncbi/projectnb/incrna/ncbi/nr.pal -max-hit-per-query 1 -max-hsp-per-hit 1 -e 1e-3 -o /projectnb/incrna/mary_lncrna/runs/plast/forcedtop100_plast2.out 
+###/projectnb/incrna/Plast/build/bin/plast -a $NSLOTS -p plastx -i /projectnb/incrna/mary_lncrna/runs/plast/1000seq_run/top100.fasta -d /projectnb/incrna/ncbi/projectnb/incrna/ncbi/nr.pal -max-hit-per-query 1 -max-hsp-per-hit 1 -e 1e-3 -o /projectnb/incrna/mary_lncrna/runs/plast/first100_plast2.out 
 #####################################################################################################################################################################
 
 ########################### main run for plast2 run - ncbi nr and filter ###################################################################
