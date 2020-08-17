@@ -9,7 +9,7 @@ output_file <- "/projectnb/incrna/mary_lncrna/R/repeat/output.csv"
 # columns for matrix 
 p_value <- list(); corr_coef <- list(); gene1 <- list(); gene2 <- list()
 
-# read in count files for lncRNA and mRNA (separated prior)   
+# read in count files for lncRNA and mRNA (separated and saved prior)   
 raw_x <- read.table("/projectnb/incrna/mary_lncrna/R/repeat/lncRNA.csv", header = TRUE, sep=",", stringsAsFactors = F)
 raw_y <- read.table("/projectnb/incrna/mary_lncrna/R/repeat/mRNA.csv", header = TRUE, sep=",", stringsAsFactors = F)
 
@@ -37,6 +37,7 @@ for (i in 1:nrow(x)) {
       corr_coef <- c(corr_coef,c$estimate) # get correlation coefficient 
     }
   }}
+
 ds <- cbind(gene1,gene2,corr_coef,p_value)
 ds <- as.data.frame(ds)
 ds <- apply(ds,2,as.character)
