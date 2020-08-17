@@ -1,0 +1,100 @@
+#!/bin/bash -l 
+
+# Project name 
+#$ -P incrna
+
+# Execute the job from  the  current  working  directory
+#$ -cwd
+
+# Job name
+#$ -N plast_otherdbs
+
+# Combine output and error files into a single file
+#$ -j y
+#$ -o $JOB_NAME.log
+
+# Send an email when the job finishes or if it is aborted or suspended 
+#$ -m beas
+
+# Request a partial 8 processor node with at least 128 GB of RAM
+#$ -pe omp 8
+#$ -l mem_per_core=8G
+
+# Keep track of information related to the current job in the output file
+echo "=========================================================="
+echo "Running job: $JOB_ID $JOB_NAME"
+echo "Started: $(date +%F)"
+echo "Running in directory: $PWD"
+echo "=========================================================="
+
+## Plasting lncRNAs against other lncRNA databases 
+
+########################### against Huang et al (21 seconds) ##################################
+# first edited Huang's lncrna sequence file to have a line break after every 60 nucleotides - similar format as other files we previously plasted against (not sure if this would make a difference but did it to just be safe) 
+fold -w 60 /projectnb/incrna/mary_lncrna/runs/lncrnaVSotherdbs/lncRNAs.fa > /projectnb/incrna/mary_lncrna/runs/lncrnaVSotherdbs/updated_lncRNAs.fa
+## Huang et al lncrna file has 8117 transcriptomes 
+
+
+# plast lncRNA transcriptome against the Huang et al's lncRNA sequenes of coral A. digitifera  
+/projectnb/incrna/Plast/build/bin/plast -a $NSLOTS -p plastx -i /projectnb/incrna/mary_lncrna/runs/post_plast/pfam_filtered.fasta -d /projectnb/incrna/mary_lncrna/runs/lncrnaVSotherdbs/updated_lncRNAs.fa -max-hit-per-query 1 -max-hsp-per-hit 1 -e 1e-3 -o /projectnb/incrna/mary_lncrna/runs/lncrnaVSotherdbs/againstHuang.out
+## 111 genes with 108 unique ones 
+
+# get the IDs of genes that had hits 
+awk '{print $1}' /projectnb/incrna/mary_lncrna/runs/lncrnaVSotherdbs/againstHuang.out | sort | uniq > /projectnb/incrna/mary_lncrna/runs/lncrnaVSotherdbs/againstHuang_IDs.txt
+
+
+########################### against dnacentral (4 hrs 25 min 49 sec) ##################################
+
+
+# plast lncRNA transcriptome against dnacentral 
+/projectnb/incrna/Plast/build/bin/plast -a $NSLOTS -p plastx -i /projectnb/incrna/mary_lncrna/runs/post_plast/pfam_filtered.fasta -d /projectnb/incrna/DBlncs/dnacentral.fasta -max-hit-per-query 1 -max-hsp-per-hit 1 -e 1e-3 -o /projectnb/incrna/mary_lncrna/runs/lncrnaVSotherdbs/againstDNAcentral.out
+## genes with 108 unique ones 
+
+# get the IDs of genes that had hits 
+awk '{print $1}' /projectnb/incrna/mary_lncrna/runs/lncrnaVSotherdbs/againstDNAcentral.out | sort | uniq > /projectnb/incrna/mary_lncrna/runs/lncrnaVSotherdbs/againstDNAcentral_IDs.txt
+
+
+########################### against NONCODE (took 1 hr 15 min & 31 sec) ##################################
+
+# plast lncRNA transcriptome against NONCODE 
+for i in /projectnb/incrna/mary_lncrna/runs/lncrnaVSotherdbs/NONCODE/*fa
+do
+  /projectnb/incrna/Plast/build/bin/plast -a $NSLOTS -p plastx -i /projectnb/incrna/mary_lncrna/runs/post_plast/pfam_filtered.fasta -d "$i" -max-hit-per-query 1 -max-hsp-per-hit 1 -e 1e-3 -o "${i/%.fa/.out}"  
+done
+
+for i in /projectnb/incrna/mary_lncrna/runs/lncrnaVSotherdbs/NONCODE/*out
+do
+  awk '{print $1}' "$i" | sort | uniq > "${i/%.out/_IDs.txt}"
+done
+
+########################### against CANTANA2.0 (took 33 seconds) ##################################
+
+# plast lncRNA transcriptome against CANTANA2.0 
+
+for i in /projectnb/incrna/mary_lncrna/runs/lncrnaVSotherdbs/CANTANA2.0/*fasta
+do
+  /projectnb/incrna/Plast/build/bin/plast -a $NSLOTS -p plastx -i /projectnb/incrna/mary_lncrna/runs/post_plast/pfam_filtered.fasta -d "$i" -max-hit-per-query 1 -max-hsp-per-hit 1 -e 1e-3 -o "${i/%.fasta/.out}"  
+done
+
+for i in /projectnb/incrna/mary_lncrna/runs/lncrnaVSotherdbs/CANTANA2.0/*out
+do
+  awk '{print $1}' "$i" | sort | uniq > "${i/%.out/_IDs.txt}"
+done
+
+########################### James's lncRNA list against Huang et al (24 seconds) ##################################
+
+# plast James's lncRNA transcriptome against the Huang et al's lncRNA sequenes of coral A. digitifera
+/projectnb/incrna/Plast/build/bin/plast -a $NSLOTS -p plastx -i /projectnb/incrna/RunWithNewGenome/Post_Blast_Filter/Pfam_filter/miRNAfilt.fasta.transdecoder_dir/pfamfilt.fasta -d /projectnb/incrna/mary_lncrna/runs/lncrnaVSotherdbs/updated_lncRNAs.fa -max-hit-per-query 1 -max-hsp-per-hit 1 -e 1e-3 -o /projectnb/incrna/mary_lncrna/runs/lncrnaVSotherdbs/JamesagainstHuang.out
+## 148 genes with 142 unique ones 
+
+# get the IDs of genes that had hits 
+awk '{print $1}' /projectnb/incrna/mary_lncrna/runs/lncrnaVSotherdbs/JamesagainstHuang.out | sort | uniq > /projectnb/incrna/mary_lncrna/runs/lncrnaVSotherdbs/JamesagainstHuang_IDs.txt
+
+
+###### after the .out and _IDs.txt files were produced for each plast run, I moved them to the following directory with separate directories for each so it is easier to find  
+## /projectnb/incrna/mary_lncrna/runs/lncrnaVSotherdbs/hit_results/
+
+echo "=========================================================="
+echo "Job finished: $(date +%F)"
+echo "Finished in $SECONDS seconds."
+echo "=========================================================="
