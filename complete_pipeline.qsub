@@ -243,16 +243,16 @@ grep -e ">" /projectnb/incrna/mary_lncrna/runs/post_plast/removethese | awk '{pr
 # additional filtering using Coding Potential Calculator (CPC) to assess the protein-coding potential of those putative lncRNA candidates
 
 ##################################################################################################################
-# James had already run this so there was no need to run it again 
-###. Unpack the tarball:
-###tom@linux$ gzip -dc CPC2-beta.tar.gz | tar xf -
-###b. Build third-part packages:
-###tom@linux$ cd CPC2-beta
-###tom@linux$ export CPC_HOME="$PWD"
-###tom@linux$ cd libs/libsvm
-###tom@linux$ gzip -dc libsvm-3.18.tar.gz | tar xf -
-###tom@linux$ cd libsvm-3.18
-###tom@linux$ make clean && make
+# James had already run these so there was no need to run them again 
+## Unpack the tarball:
+###gzip -dc CPC2-beta.tar.gz | tar xf -
+## Build third-part packages:
+###cd CPC2-beta
+###export CPC_HOME="$PWD"
+###cd libs/libsvm
+###gzip -dc libsvm-3.18.tar.gz | tar xf -
+###cd libsvm-3.18
+###make clean && make
 ##################################################################################################################
 
 
