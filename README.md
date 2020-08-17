@@ -13,3 +13,5 @@
 #### count_analysis_report.pdf: Obtained by knitting count_analysis.Rmd - includes code and outputs such as tables and figures 
 
 #### mrna_annotation.qsub: Annotation of the mRNA transcriptome using UniProt database
+
+#### plast_otherdbs.qsub: Plasting our lncRNA transcriptome against other lncRNA databases 
